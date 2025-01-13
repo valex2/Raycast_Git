@@ -16,12 +16,12 @@ interface EventDetails {
 async function parseEventDetailsWithSpaCy(input: string): Promise<EventDetails> {
   return new Promise((resolve, reject) => {
     // Python script file path
-    const scriptPath = "/Users/Vassilis/Desktop/Raycast/ical-generator/parse_event_details.py";
+    const scriptPath = "/Users/Vassilis/Desktop/Raycast_Git/ical-generator/parse_event_details.py";
 
     PythonShell.run(
       scriptPath,
       {
-        pythonPath: "/Users/Vassilis/Desktop/Raycast/ical-env/bin/python3", // Path to virtual environment's Python
+        pythonPath: "/Users/Vassilis/Desktop/Raycast_Git/ical-env/bin/python3", // Path to virtual environment's Python
         args: [input],
       },
       (err, results) => {

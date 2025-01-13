@@ -12,6 +12,7 @@
       "title": "iCal Generate",
       "description": "Generate an iCal event from plain text.",
       "mode": "no-view",
+      "path": "src/ical-generate.ts",
       "arguments": {
         "text": {
           "type": "string",

@@ -1,77 +1,54 @@
-import spacy
-import re
-import json
-from datetime import datetime
+def parse_event_details(text):
+    import re
+    from datetime import datetime, timedelta
 
-# Load SpaCy model
-nlp = spacy.load("en_core_web_sm")
+    # Extract title using regex for capitalized title structure
+    title_match = re.search(r"^[A-Z][a-z]+ [A-Z][a-z]+", text, re.MULTILINE)
+    title = title_match.group(0).strip() if title_match else "Unknown Title"
 
-def parse_event_details(input_text):
-    doc = nlp(input_text)
+    # Extract event description (after title and advisor line)
+    summary_start = text.find(title) + len(title)
+    advisor_start = text.find("Advisor:")
+    summary = text[advisor_start + len("Advisor:"):] if advisor_start != -1 else text[summary_start:]
+    summary = summary.strip()
 
-    location, date, time_start, time_end = None, None, None, None
+    # Extract date
+    date_match = re.search(r"Date:\s*([A-Za-z]+,\s*[A-Za-z]+\s*\d{1,2},\s*\d{4})", text)
+    date_str = date_match.group(1).strip() if date_match else None
 
-    # Extract entities using SpaCy
-    for ent in doc.ents:
-        if ent.label_ in {"GPE", "LOC", "FAC"} and not location:  # Location-related entities
-            location = ent.text.strip()
-        elif ent.label_ == "DATE" and not date:  # Date entity
-            date = ent.text.strip()
-        elif ent.label_ == "TIME":  # Time entity
-            # Match explicit time range or single time
-            time_match = re.match(r"(\d{1,2}:\d{2}(?:\s?[APap][Mm])?)(?:\s*-\s*(\d{1,2}:\d{2}(?:\s?[APap][Mm])?))?", ent.text)
-            if time_match:
-                time_start = time_match.group(1)
-                time_end = time_match.group(2)
+    # Extract time
+    time_match = re.search(r"Time:\s*([\d:apm\s]+)", text)
+    time_str = time_match.group(1).strip() if time_match else None
 
-    # Fallback regex to extract date if SpaCy misses it
-    if not date:
-        date_match = re.search(r"[A-Za-z]+\s\d{1,2},\s\d{4}", input_text)
-        if date_match:
-            date = date_match.group(0)
-
-    # Fallback regex to extract time if SpaCy misses it
-    if not time_start:
-        time_match = re.search(r"\b\d{1,2}:\d{2}(?:\s?[APap][Mm])?\b", input_text)
-        if time_match:
-            time_start = time_match.group(0)
-
-    # Parse extracted date and time
-    parsed_date, parsed_start, parsed_end = None, None, None
-    if date:
+    if date_str and time_str:
         try:
-            parsed_date = datetime.strptime(date, "%A, %B %d, %Y")
-        except ValueError:
-            pass
+            start_datetime_str = f"{date_str} {time_str}"
+            start = datetime.strptime(start_datetime_str, "%A, %B %d, %Y %I:%M %p")
+            end = start + timedelta(hours=1)  # Default to 1-hour duration
+        except ValueError as e:
+            raise ValueError(f"Error parsing datetime: {e}")
+    else:
+        start = end = None
 
-    if parsed_date and time_start:
-        try:
-            parsed_start = datetime.strptime(f"{date} {time_start.strip()}", "%A, %B %d, %Y %I:%M %p")
-        except ValueError:
-            pass
+    # Extract location
+    location_match = re.search(r"Location:\s*(.*)", text)
+    location = location_match.group(1).strip() if location_match else "Unknown Location"
 
-    if parsed_date and time_end:
-        try:
-            parsed_end = datetime.strptime(f"{date} {time_end.strip()}", "%A, %B %d, %Y %I:%M %p")
-        except ValueError:
-            pass
-
-    # Clean up title and remove redundant lines
-    title = re.sub(r"(Date:.*|Time:.*|Location:.*|Zoom Link:.*)", "", input_text, flags=re.IGNORECASE).strip().split("\n")[0]
-
-    # Construct event details
+    # Construct Event Details JSON
     event_details = {
-        "title": title if title else "Untitled Event",
-        "start": parsed_start.isoformat() if parsed_start else None,
-        "end": parsed_end.isoformat() if parsed_end else None,
+        "title": title,
+        "start": start.isoformat() if start else "Unknown Start",
+        "end": end.isoformat() if end else "Unknown End",
         "location": location,
-        "summary": input_text.strip(),
+        "summary": summary
     }
 
     return event_details
 
 if __name__ == "__main__":
     import sys
+    import json
+
     if len(sys.argv) > 1:
         input_text = sys.argv[1]
         details = parse_event_details(input_text)
