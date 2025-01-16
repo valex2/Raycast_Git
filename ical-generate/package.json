@@ -23,7 +23,9 @@
   ],
   "dependencies": {
     "@raycast/api": "^1.88.4",
-    "@raycast/utils": "^1.17.0"
+    "@raycast/utils": "^1.17.0",
+    "chrono-node": "^2.7.7",
+    "ical-generator": "^8.1.1"
   },
   "devDependencies": {
     "@raycast/eslint-config": "^1.0.11",
