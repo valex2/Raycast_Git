@@ -41,6 +41,12 @@ function parseEventDetails(input: string): EventDetails {
   };
 }
 
+// Helper function to convert to Pacific Time (UTC - 8 or UTC - 7 depending on daylight saving time)
+function convertToPacificTime(date: Date): Date {
+  const options = { timeZone: 'America/Los_Angeles', timeZoneName: 'short' };
+  return new Date(date.toLocaleString('en-US', options));
+}
+
 async function createCalendarEvent(input: string): Promise<void> {
   console.log("Received input:", input);
 
@@ -48,6 +54,8 @@ async function createCalendarEvent(input: string): Promise<void> {
     await showToast(ToastStyle.Failure, "Input required", "Please describe the event details.");
     return;
   }
+
+  let titleModified = false;
 
   try {
     // Sanitize the input string by removing extra quotes and trimming spaces
@@ -65,13 +73,19 @@ async function createCalendarEvent(input: string): Promise<void> {
     let eventStart = parsedDateTime ? new Date(parsedDateTime) : new Date();
     if (isNaN(eventStart.getTime())) {
       console.warn("Invalid parsed date, using current date and time as fallback.");
+      titleModified = true;
       eventStart = new Date(); // Default to current date if parsed date is invalid
     }
 
+    // Convert the event start time to Pacific Time
+    eventStart = convertToPacificTime(eventStart);
     const eventEnd = new Date(eventStart.getTime() + 60 * 60 * 1000); // Default to 1-hour duration
 
     // Extract the event summary (title) from the input before "Date:"
-    const summary = input.split("Date:")[0].trim() || "Untitled Event";
+    let summary = input.split("Date:")[0].trim() || "Untitled Event";
+    if (titleModified) {
+      summary = `*** ${summary}`; // Add "***" to the summary to indicate a default was used
+    }
 
     // Extract the full input as notes (everything after "Date:" including Zoom Link if present)
     const notes = input.trim();
@@ -91,12 +105,15 @@ async function createCalendarEvent(input: string): Promise<void> {
 
     // Generate ICS
     const calendar = ical({ name: "Raycast Events" });
+
+    // Add event to the calendar with the Pacific Time zone
     const eventOptions: any = {
       start: eventStart,
       end: eventEnd, // Default to 1-hour duration
       summary,
       location, // Add location if available
       description: notes, // Set the input text as the notes
+      timezone: 'America/Los_Angeles', // Set the timezone to Pacific Time
     };
 
     // If Zoom link exists, add it to the notes
