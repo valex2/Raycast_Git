@@ -50,45 +50,40 @@ async function createCalendarEvent(input: string): Promise<void> {
   }
 
   try {
-    // Extract the full date and time using chrono-node
+    // Use chrono to parse the date and time from the input (handles a wide range of formats)
     const parsedResults = chrono.parse(input);
     if (parsedResults.length === 0) {
-      throw new Error("Could not parse date and time.");
+      throw new Error("Could not find a valid date and time.");
     }
 
-    const parsedDate = parsedResults[0].start?.date();
-    if (!parsedDate) {
-      throw new Error("Could not parse a valid date.");
+    const parsedDateTime = parsedResults[0].start;
+    if (!parsedDateTime || !(parsedDateTime instanceof Date)) {
+      throw new Error("Parsed date is invalid.");
     }
 
-    // Extract the first time option from the input
-    const timePattern = /(\d{1,2}:\d{2}[APM]{2})/g; // Regex pattern to match times
-    const timeMatches = input.match(timePattern);
-    if (!timeMatches || timeMatches.length === 0) {
-      throw new Error("Could not find valid time options.");
-    }
-
-    // Take the first time option (Option 1)
-    const firstTime = timeMatches[0];
-    const parsedTime = chrono.parseDate(firstTime);
+    // Extract the first matching time (if available)
+    const parsedTime = parsedResults[0].start?.getTime();
     if (!parsedTime) {
-      throw new Error("Could not parse the time.");
+      throw new Error("Could not extract valid time.");
     }
 
-    // Combine the parsed date and time
-    const eventStart = new Date(parsedDate);
-    eventStart.setHours(parsedTime.getHours());
-    eventStart.setMinutes(parsedTime.getMinutes());
+    // Use the parsed date as the event start time
+    const eventStart = new Date(parsedDateTime);
+    const eventEnd = new Date(eventStart.getTime() + 60 * 60 * 1000); // Default 1 hour
 
-    // Set the title of the event to "Major workshop"
-    const summary = "Major workshop";
+    // Extract the event summary (title) from the input
+    const summary = input.split("Date:")[0].trim() || "Untitled Event";
 
     // Extract the full input as notes
     const notes = input.trim();
 
-    // Set the location to "Zoom" if it's mentioned in the input
-    const locationMatch = input.match(/\(.*\)/);
-    const location = locationMatch ? locationMatch[0].replace(/[()]/g, "") : undefined;
+    // Extract location (if present) using a regex looking for "Location:"
+    const locationMatch = input.match(/Location:\s*([\s\S]+?)(?=\s*(Zoom Link:|$))/);
+    const location = locationMatch ? locationMatch[1].trim() : undefined;
+
+    // Extract Zoom link (if present)
+    const zoomLinkMatch = input.match(/Zoom Link:\s*(https?:\/\/\S+)/);
+    const zoomLink = zoomLinkMatch ? zoomLinkMatch[1].trim() : undefined;
 
     console.log("Parsed summary:", summary);
     console.log("Parsed start:", eventStart);
@@ -97,13 +92,20 @@ async function createCalendarEvent(input: string): Promise<void> {
 
     // Generate ICS
     const calendar = ical({ name: "Raycast Events" });
-    calendar.createEvent({
+    const eventOptions: any = {
       start: eventStart,
-      end: new Date(eventStart.getTime() + 60 * 60 * 1000), // Default to 1-hour duration
+      end: eventEnd, // Default to 1-hour duration
       summary,
       location, // Add location if available
       description: notes, // Set the input text as the notes
-    });
+    };
+
+    // If Zoom link exists, add it to the notes or location
+    if (zoomLink) {
+      eventOptions.description += `\nZoom Link: ${zoomLink}`;
+    }
+
+    calendar.createEvent(eventOptions);
 
     // Sanitize the filename to avoid issues with special characters
     const sanitizedSummary = summary.replace(/[^\w\s-]/g, '').replace(/\s+/g, '_');
@@ -124,6 +126,7 @@ async function createCalendarEvent(input: string): Promise<void> {
     await showToast(ToastStyle.Failure, "Failed to create event", error.message);
   }
 }
+
 
 export default async (args: { arguments?: { text?: string } }) => {
   console.log("Args received:", args); // Log the full args object
