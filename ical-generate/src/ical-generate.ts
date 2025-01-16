@@ -50,6 +50,17 @@ async function createCalendarEvent(input: string): Promise<void> {
   }
 
   try {
+    // Extract the full date and time using chrono-node
+    const parsedResults = chrono.parse(input);
+    if (parsedResults.length === 0) {
+      throw new Error("Could not parse date and time.");
+    }
+
+    const parsedDate = parsedResults[0].start?.date();
+    if (!parsedDate) {
+      throw new Error("Could not parse a valid date.");
+    }
+
     // Extract the first time option from the input
     const timePattern = /(\d{1,2}:\d{2}[APM]{2})/g; // Regex pattern to match times
     const timeMatches = input.match(timePattern);
@@ -64,6 +75,11 @@ async function createCalendarEvent(input: string): Promise<void> {
       throw new Error("Could not parse the time.");
     }
 
+    // Combine the parsed date and time
+    const eventStart = new Date(parsedDate);
+    eventStart.setHours(parsedTime.getHours());
+    eventStart.setMinutes(parsedTime.getMinutes());
+
     // Set the title of the event to "Major workshop"
     const summary = "Major workshop";
 
@@ -75,15 +91,15 @@ async function createCalendarEvent(input: string): Promise<void> {
     const location = locationMatch ? locationMatch[0].replace(/[()]/g, "") : undefined;
 
     console.log("Parsed summary:", summary);
-    console.log("Parsed start:", parsedTime);
+    console.log("Parsed start:", eventStart);
     console.log("Parsed location:", location);
     console.log("Notes:", notes);
 
     // Generate ICS
     const calendar = ical({ name: "Raycast Events" });
     calendar.createEvent({
-      start: parsedTime,
-      end: new Date(parsedTime.getTime() + 60 * 60 * 1000), // Default to 1-hour duration
+      start: eventStart,
+      end: new Date(eventStart.getTime() + 60 * 60 * 1000), // Default to 1-hour duration
       summary,
       location, // Add location if available
       description: notes, // Set the input text as the notes
@@ -108,7 +124,6 @@ async function createCalendarEvent(input: string): Promise<void> {
     await showToast(ToastStyle.Failure, "Failed to create event", error.message);
   }
 }
-
 
 export default async (args: { arguments?: { text?: string } }) => {
   console.log("Args received:", args); // Log the full args object
