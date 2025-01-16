@@ -50,22 +50,48 @@ async function createCalendarEvent(input: string): Promise<void> {
   }
 
   try {
-    const { summary, start, location } = parseEventDetails(input);
+    // Extract the first time option from the input
+    const timePattern = /(\d{1,2}:\d{2}[APM]{2})/g; // Regex pattern to match times
+    const timeMatches = input.match(timePattern);
+    if (!timeMatches || timeMatches.length === 0) {
+      throw new Error("Could not find valid time options.");
+    }
+
+    // Take the first time option (Option 1)
+    const firstTime = timeMatches[0];
+    const parsedTime = chrono.parseDate(firstTime);
+    if (!parsedTime) {
+      throw new Error("Could not parse the time.");
+    }
+
+    // Set the title of the event to "Major workshop"
+    const summary = "Major workshop";
+
+    // Extract the full input as notes
+    const notes = input.trim();
+
+    // Set the location to "Zoom" if it's mentioned in the input
+    const locationMatch = input.match(/\(.*\)/);
+    const location = locationMatch ? locationMatch[0].replace(/[()]/g, "") : undefined;
 
     console.log("Parsed summary:", summary);
-    console.log("Parsed start:", start);
+    console.log("Parsed start:", parsedTime);
     console.log("Parsed location:", location);
+    console.log("Notes:", notes);
 
     // Generate ICS
     const calendar = ical({ name: "Raycast Events" });
     calendar.createEvent({
-      start,
-      end: new Date(start.getTime() + 60 * 60 * 1000), // Default to 1-hour duration
+      start: parsedTime,
+      end: new Date(parsedTime.getTime() + 60 * 60 * 1000), // Default to 1-hour duration
       summary,
       location, // Add location if available
+      description: notes, // Set the input text as the notes
     });
 
-    const filePath = `/tmp/${summary.replace(/\s+/g, "_")}.ics`;
+    // Sanitize the filename to avoid issues with special characters
+    const sanitizedSummary = summary.replace(/[^\w\s-]/g, '').replace(/\s+/g, '_');
+    const filePath = `/tmp/${sanitizedSummary}.ics`;
 
     // Write ICS content to file
     fs.writeFileSync(filePath, calendar.toString(), "utf8");
@@ -82,6 +108,7 @@ async function createCalendarEvent(input: string): Promise<void> {
     await showToast(ToastStyle.Failure, "Failed to create event", error.message);
   }
 }
+
 
 export default async (args: { arguments?: { text?: string } }) => {
   console.log("Args received:", args); // Log the full args object
