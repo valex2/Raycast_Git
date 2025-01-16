@@ -50,36 +50,35 @@ async function createCalendarEvent(input: string): Promise<void> {
   }
 
   try {
+    // Sanitize the input string by removing extra quotes and trimming spaces
+    input = input.trim().replace(/^["']|["']$/g, '');
+
     // Use chrono to parse the date and time from the input (handles a wide range of formats)
     const parsedResults = chrono.parse(input);
-    if (parsedResults.length === 0) {
-      throw new Error("Could not find a valid date and time.");
+    if (parsedResults.length === 0 || !parsedResults[0].start) {
+      console.warn("Could not find a valid date and time, proceeding with default behavior.");
     }
 
-    const parsedDateTime = parsedResults[0].start;
-    if (!parsedDateTime || !(parsedDateTime instanceof Date)) {
-      throw new Error("Parsed date is invalid.");
+    const parsedDateTime = parsedResults.length > 0 && parsedResults[0].start ? parsedResults[0].start : undefined;
+
+    // If parsedDateTime is invalid, use the current date as a fallback
+    let eventStart = parsedDateTime ? new Date(parsedDateTime) : new Date();
+    if (isNaN(eventStart.getTime())) {
+      console.warn("Invalid parsed date, using current date and time as fallback.");
+      eventStart = new Date(); // Default to current date if parsed date is invalid
     }
 
-    // Extract the first matching time (if available)
-    const parsedTime = parsedResults[0].start?.getTime();
-    if (!parsedTime) {
-      throw new Error("Could not extract valid time.");
-    }
+    const eventEnd = new Date(eventStart.getTime() + 60 * 60 * 1000); // Default to 1-hour duration
 
-    // Use the parsed date as the event start time
-    const eventStart = new Date(parsedDateTime);
-    const eventEnd = new Date(eventStart.getTime() + 60 * 60 * 1000); // Default 1 hour
-
-    // Extract the event summary (title) from the input
+    // Extract the event summary (title) from the input before "Date:"
     const summary = input.split("Date:")[0].trim() || "Untitled Event";
 
-    // Extract the full input as notes
+    // Extract the full input as notes (everything after "Date:" including Zoom Link if present)
     const notes = input.trim();
 
     // Extract location (if present) using a regex looking for "Location:"
     const locationMatch = input.match(/Location:\s*([\s\S]+?)(?=\s*(Zoom Link:|$))/);
-    const location = locationMatch ? locationMatch[1].trim() : undefined;
+    const location = locationMatch ? locationMatch[1].trim() : "Location not specified";
 
     // Extract Zoom link (if present)
     const zoomLinkMatch = input.match(/Zoom Link:\s*(https?:\/\/\S+)/);
@@ -100,7 +99,7 @@ async function createCalendarEvent(input: string): Promise<void> {
       description: notes, // Set the input text as the notes
     };
 
-    // If Zoom link exists, add it to the notes or location
+    // If Zoom link exists, add it to the notes
     if (zoomLink) {
       eventOptions.description += `\nZoom Link: ${zoomLink}`;
     }
@@ -123,10 +122,9 @@ async function createCalendarEvent(input: string): Promise<void> {
     );
   } catch (error) {
     console.error("Error:", error);
-    await showToast(ToastStyle.Failure, "Failed to create event", error.message);
+    await showToast(ToastStyle.Failure, "Failed to create event", "An error occurred while processing the event.");
   }
 }
-
 
 export default async (args: { arguments?: { text?: string } }) => {
   console.log("Args received:", args); // Log the full args object
