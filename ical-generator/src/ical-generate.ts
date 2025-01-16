@@ -1,50 +1,46 @@
 import { showToast, ToastStyle } from "@raycast/api";
+import * as chrono from "chrono-node";
 import ical from "ical-generator";
 import { execSync } from "child_process";
 import fs from "fs";
-import { PythonShell } from "python-shell";
 
 interface EventDetails {
-  title: string;
-  start?: string;
-  end?: string;
+  summary: string;
+  start: Date;
   location?: string;
-  summary?: string;
 }
 
-// Function to parse event details using the Python script
-async function parseEventDetailsWithSpaCy(input: string): Promise<EventDetails> {
-  return new Promise((resolve, reject) => {
-    // Python script file path
-    const scriptPath = "/Users/Vassilis/Desktop/Raycast_Git/ical-generator/parse_event_details.py";
+function parseEventDetails(input: string): EventDetails {
+  const parsedResults = chrono.parse(input);
+  if (parsedResults.length === 0) {
+    throw new Error("Could not parse date and time.");
+  }
 
-    PythonShell.run(
-      scriptPath,
-      {
-        pythonPath: "/Users/Vassilis/Desktop/Raycast_Git/ical-env/bin/python3", // Path to virtual environment's Python
-        args: [input],
-      },
-      (err, results) => {
-        if (err) {
-          console.error("Error executing Python script:", err);
-          reject("Failed to parse event details.");
-        } else {
-          console.log("Raw Python Script Output:", results); // Log raw results for debugging
-          try {
-            const parsedDetails = JSON.parse(results?.[0] || "{}");
-            console.log("Parsed Event Details:", parsedDetails);
-            resolve(parsedDetails);
-          } catch (parseError) {
-            console.error("Error parsing Python script output:", parseError);
-            reject("Failed to parse event details.");
-          }
-        }
-      }
-    );
-  });
+  const parsedDate = parsedResults[0].start?.date();
+  if (!parsedDate) {
+    throw new Error("Could not parse a valid date.");
+  }
+
+  // Remove the date/time-related text from the input
+  const dateText = parsedResults[0].text; // The exact date/time string that was parsed
+  let remainingText = input.replace(dateText, "").trim();
+
+  // Extract location based on the word "at" or "in"
+  const locationMatch = remainingText.match(/(?:at|in)\s+(.+)/i);
+  const location = locationMatch ? locationMatch[1].trim() : undefined;
+
+  // Remove the location text from the summary
+  if (location) {
+    remainingText = remainingText.replace(locationMatch[0], "").trim();
+  }
+
+  return {
+    summary: remainingText,
+    start: parsedDate,
+    location,
+  };
 }
 
-// Function to create a calendar event and open it in the calendar app
 async function createCalendarEvent(input: string): Promise<void> {
   console.log("Received input:", input);
 
@@ -54,57 +50,45 @@ async function createCalendarEvent(input: string): Promise<void> {
   }
 
   try {
-    const { title, start, end, location, summary } = await parseEventDetailsWithSpaCy(input);
+    const { summary, start, location } = parseEventDetails(input);
 
-    console.log("Event Details from Python Script:", { title, start, end, location, summary });
-
-    if (!title || !start) {
-      console.error("Title or start time is missing:", { title, start });
-      throw new Error("Failed to extract key event details.");
-    }
+    console.log("Parsed summary:", summary);
+    console.log("Parsed start:", start);
+    console.log("Parsed location:", location);
 
     // Generate ICS
     const calendar = ical({ name: "Raycast Events" });
     calendar.createEvent({
-      start: new Date(start),
-      end: end ? new Date(end) : new Date(new Date(start).getTime() + 60 * 60 * 1000), // Default duration: 1 hour
-      summary: title,
-      description: summary,
-      location,
+      start,
+      end: new Date(start.getTime() + 60 * 60 * 1000), // Default to 1-hour duration
+      summary,
+      location, // Add location if available
     });
 
-    const filePath = `/tmp/${title.replace(/\s+/g, "_")}.ics`;
-    console.log("ICS File Path:", filePath);
+    const filePath = `/tmp/${summary.replace(/\s+/g, "_")}.ics`;
 
-    // Write the ICS file
+    // Write ICS content to file
     fs.writeFileSync(filePath, calendar.toString(), "utf8");
-    console.log("ICS File Written Successfully:", filePath);
 
-    // Open the ICS file with the default calendar application
+    // Open the file with the default calendar application
     execSync(`open ${filePath}`);
-    console.log("ICS File Opened in Calendar App.");
-
     await showToast(
       ToastStyle.Success,
       "Event added",
-      `Added "${title}" to your Apple Calendar.`
+      `Added "${summary}" to your Apple Calendar with location "${location || "N/A"}".`
     );
   } catch (error) {
-    console.error("Error creating calendar event:", error);
+    console.error("Error:", error);
     await showToast(ToastStyle.Failure, "Failed to create event", error.message);
   }
 }
 
-
-// Main entry point for the Raycast command
 export default async (args: { arguments?: { text?: string } }) => {
   console.log("Args received:", args); // Log the full args object
+  const input = args.arguments?.text; // Access the text argument
+  console.log("Input extracted:", input); // Log the extracted input
 
-  // Extract input from the arguments
-  const input = args.arguments?.text?.trim();
-  console.log("Extracted input:", input);
-
-  if (!input) {
+  if (!input || input.trim() === "") {
     console.log("No input provided.");
     await showToast(ToastStyle.Failure, "Input required", "Please describe the event details.");
     return;
