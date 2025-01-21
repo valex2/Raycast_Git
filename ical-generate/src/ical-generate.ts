@@ -9,10 +9,10 @@ interface EventDetails {
   start: Date;
   end?: Date;
   location?: string;
+  recurrence?: { freq: string; interval: number; byDay?: string[] };
 }
 
 function parseEventDetails(input: string): EventDetails {
-  // Use chrono to parse the date and time from the input
   const parsedResults = chrono.parse(input);
   if (parsedResults.length === 0) {
     throw new Error("Could not parse date and time.");
@@ -39,11 +39,31 @@ function parseEventDetails(input: string): EventDetails {
     remainingText = remainingText.replace(locationMatch[0], "").trim();
   }
 
+  // Detect recurrence patterns (e.g., "every week," "every Wednesday")
+  let recurrence: EventDetails["recurrence"] = undefined;
+  const recurrenceMatch = input.match(/every\s+(week|day|month|year|[a-zA-Z]+day)/i);
+  if (recurrenceMatch) {
+    const freqMap: { [key: string]: string } = {
+      week: "WEEKLY",
+      day: "DAILY",
+      month: "MONTHLY",
+      year: "YEARLY",
+    };
+
+    const freq = freqMap[recurrenceMatch[1].toLowerCase()] || "WEEKLY"; // Default to WEEKLY for specific weekdays
+    const byDay = freq === "WEEKLY" && recurrenceMatch[1].toLowerCase().endsWith("day")
+      ? [recurrenceMatch[1].toUpperCase().substring(0, 2)] // Convert day names to ICS format (e.g., "MO", "WE")
+      : undefined;
+
+    recurrence = { freq, interval: 1, byDay };
+  }
+
   return {
     summary: remainingText,
     start: parsedDate,
     end: parsedEndDate,
     location,
+    recurrence,
   };
 }
 
@@ -61,46 +81,50 @@ async function createCalendarEvent(input: string): Promise<void> {
   }
 
   try {
-    // Sanitize the input string by removing extra quotes and trimming spaces
     input = input.trim().replace(/^["']|["']$/g, "");
+    const { summary, start, end, location, recurrence } = parseEventDetails(input);
 
-    // Parse event details
-    const { summary, start, end, location } = parseEventDetails(input);
-
-    // Convert start and end times to Pacific Time
     const eventStart = convertToPacificTime(start);
-    const eventEnd = end ? convertToPacificTime(end) : new Date(eventStart.getTime() + 60 * 60 * 1000); // Default 1-hour duration
+    const eventEnd = end ? convertToPacificTime(end) : new Date(eventStart.getTime() + 60 * 60 * 1000);
 
     console.log("Parsed summary:", summary);
     console.log("Parsed start:", eventStart);
     console.log("Parsed end:", eventEnd);
     console.log("Parsed location:", location);
+    console.log("Parsed recurrence:", recurrence);
 
-    // Generate ICS
     const calendar = ical({ name: "Raycast Events" });
 
-    calendar.createEvent({
+    const eventOptions: any = {
       start: eventStart,
       end: eventEnd,
       summary,
       location,
       description: input,
       timezone: "America/Los_Angeles",
-    });
+    };
 
-    // Sanitize the filename to avoid issues with special characters
+    // Add recurrence rule if present
+    if (recurrence) {
+      eventOptions.repeating = {
+        freq: recurrence.freq,
+        interval: recurrence.interval,
+        byDay: recurrence.byDay,
+      };
+    }
+
+    calendar.createEvent(eventOptions);
+
     const sanitizedSummary = summary.replace(/[^\w\s-]/g, "").replace(/\s+/g, "_");
     const filePath = `/tmp/${sanitizedSummary}.ics`;
 
-    // Write ICS content to file
     fs.writeFileSync(filePath, calendar.toString(), "utf8");
 
-    // Open the file with the default calendar application
     execSync(`open ${filePath}`);
     await showToast(
       ToastStyle.Success,
       "Event added",
-      `Added "${summary}" to your Apple Calendar with location "${location || "N/A"}".`
+      `Added "${summary}" to your Apple Calendar${location ? ` with location "${location}"` : ""}.`
     );
   } catch (error) {
     console.error("Error:", error);
