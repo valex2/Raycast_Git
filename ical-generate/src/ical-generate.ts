@@ -12,59 +12,67 @@ interface EventDetails {
   recurrence?: { freq: string; interval: number; byDay?: string[] };
 }
 
-function parseEventDetails(input: string): EventDetails {
-  const parsedResults = chrono.parse(input);
-  if (parsedResults.length === 0) {
-    throw new Error("Could not parse date and time.");
-  }
+function fallbackParseLines(input: string): Partial<EventDetails> {
+  const lines = input.split("\n").map(line => line.trim()).filter(Boolean);
 
-  const parsedDate = parsedResults[0].start?.date();
-  if (!parsedDate) {
-    throw new Error("Could not parse a valid start date.");
-  }
+  const possibleDateLine = lines.find(line => chrono.parseDate(line));
+  const start = possibleDateLine ? chrono.parseDate(possibleDateLine) : undefined;
 
-  // Check for end time if available
-  const parsedEndDate = parsedResults[0].end?.date();
+  const timeLine = lines.find(l => /\d{1,2}[:–-]\d{2}/.test(l)); // "2–5 p.m."
+  const [startTime, endTime] = timeLine?.split(/[–-]/).map(t => chrono.parseDate(`${possibleDateLine} ${t}`)) ?? [];
 
-  // Remove the date/time-related text from the input
-  const dateText = parsedResults[0].text; // The exact date/time string that was parsed
-  let remainingText = input.replace(dateText, "").trim();
+  const locationLine = lines.find(l =>
+    /\b(Room|Hall|Building|Auditorium|Center|Oval|Packard|Grove|Cordura|University)\b/i.test(l) ||
+    /^[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*(?:,\s*[A-Z][a-z]+)+$/.test(l) // e.g., "Barwise Room, Cordura Hall"
+  );
 
-  // Extract location based on the word "at" or "in"
-  const locationMatch = remainingText.match(/(?:at|in)\s+(.+)/i);
-  const location = locationMatch ? locationMatch[1].trim() : undefined;
-
-  // Remove the location text from the summary
-  if (location) {
-    remainingText = remainingText.replace(locationMatch[0], "").trim();
-  }
-
-  // Detect recurrence patterns (e.g., "every week," "every Wednesday")
-  let recurrence: EventDetails["recurrence"] = undefined;
-  const recurrenceMatch = input.match(/every\s+(week|day|month|year|[a-zA-Z]+day)/i);
-  if (recurrenceMatch) {
-    const freqMap: { [key: string]: string } = {
-      week: "WEEKLY",
-      day: "DAILY",
-      month: "MONTHLY",
-      year: "YEARLY",
-    };
-
-    const freq = freqMap[recurrenceMatch[1].toLowerCase()] || "WEEKLY"; // Default to WEEKLY for specific weekdays
-    const byDay = freq === "WEEKLY" && recurrenceMatch[1].toLowerCase().endsWith("day")
-      ? [recurrenceMatch[1].toUpperCase().substring(0, 2)] // Convert day names to ICS format (e.g., "MO", "WE")
-      : undefined;
-
-    recurrence = { freq, interval: 1, byDay };
-  }
+  const summaryLine = lines.find(l => l.length > 5 && !chrono.parseDate(l) && !/\d{1,2}[:–-]\d{2}/.test(l));
 
   return {
-    summary: remainingText,
-    start: parsedDate,
-    end: parsedEndDate,
-    location,
-    recurrence,
+    summary: summaryLine,
+    location: locationLine,
+    start: startTime || start,
+    end: endTime,
   };
+}
+
+function parseEventDetails(input: string): EventDetails {
+  const chronoResults = chrono.parse(input);
+  const chronoResult = chronoResults[0];
+
+  let start = chronoResult?.start?.date();
+  let end = chronoResult?.end?.date();
+  const dateText = chronoResult?.text ?? "";
+
+  let remainingText = input.replace(dateText, "").trim();
+
+  const locationMatch = remainingText.match(/(?:at|in)\s+(.+)/i);
+  const location = locationMatch?.[1]?.trim();
+  if (locationMatch) remainingText = remainingText.replace(locationMatch[0], "").trim();
+
+  const recurrenceMatch = input.match(/every\s+(week|day|month|year|[a-zA-Z]+day)/i);
+  const freqMap = { week: "WEEKLY", day: "DAILY", month: "MONTHLY", year: "YEARLY" };
+  const freqRaw = recurrenceMatch?.[1]?.toLowerCase();
+  const freq = freqRaw && freqMap[freqRaw] ? freqMap[freqRaw] : "WEEKLY";
+  const byDay = freqRaw?.endsWith("day") ? [freqRaw.substring(0, 2).toUpperCase()] : undefined;
+
+  let details: EventDetails = {
+    summary: remainingText || "Untitled Event",
+    start,
+    end,
+    location,
+    recurrence: recurrenceMatch ? { freq, interval: 1, byDay } : undefined,
+  };
+
+  // Fallback if chrono didn't catch it all
+  if (!start || !details.summary || !location) {
+    const fallback = fallbackParseLines(input);
+    details = { ...details, ...fallback };
+  }
+
+  if (!details.start) throw new Error("No start time found.");
+
+  return details;
 }
 
 function convertToPacificTime(date: Date): Date {
@@ -104,7 +112,6 @@ async function createCalendarEvent(input: string): Promise<void> {
       timezone: "America/Los_Angeles",
     };
 
-    // Add recurrence rule if present
     if (recurrence) {
       eventOptions.repeating = {
         freq: recurrence.freq,
@@ -119,12 +126,12 @@ async function createCalendarEvent(input: string): Promise<void> {
     const filePath = `/tmp/${sanitizedSummary}.ics`;
 
     fs.writeFileSync(filePath, calendar.toString(), "utf8");
-
     execSync(`open ${filePath}`);
+
     await showToast(
       ToastStyle.Success,
       "Event added",
-      `Added "${summary}" to your Apple Calendar${location ? ` with location "${location}"` : ""}.`
+      `Added "${summary}" to your Apple Calendar${location ? ` at "${location}"` : ""}.`
     );
   } catch (error) {
     console.error("Error:", error);
